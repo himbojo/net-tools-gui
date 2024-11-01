@@ -61,6 +61,45 @@ func NewExecutor() *CommandExecutor {
 	}
 }
 
+// buildCommandString creates a human-readable command string
+func (e *CommandExecutor) buildCommandString(tool, target string, params map[string]string) string {
+	switch tool {
+	case "ping":
+		count := "4"
+		if c, ok := params["count"]; ok && c != "" {
+			count = c
+		}
+		switch runtime.GOOS {
+		case "windows":
+			return fmt.Sprintf("ping -n %s -w 2000 %s", count, target)
+		case "darwin":
+			return fmt.Sprintf("ping -c %s -t 2 %s", count, target)
+		default: // linux
+			return fmt.Sprintf("ping -c %s -W 2 -O %s", count, target)
+		}
+
+	case "dig":
+		recordType := "A"
+		if t, ok := params["type"]; ok && t != "" {
+			recordType = t
+		}
+		return fmt.Sprintf("dig +nocomments +noquestion %s %s", recordType, target)
+
+	case "traceroute":
+		maxHops := "30"
+		if h, ok := params["maxHops"]; ok && h != "" {
+			maxHops = h
+		}
+		switch runtime.GOOS {
+		case "windows":
+			return fmt.Sprintf("tracert -h %s -w 2000 %s", maxHops, target)
+		default:
+			return fmt.Sprintf("traceroute -m %s -w 2 %s", maxHops, target)
+		}
+	}
+	return ""
+}
+
 func (e *CommandExecutor) buildCommand(tool, target string, params map[string]string) (*exec.Cmd, error) {
 	toolPath, exists := e.toolPaths[tool]
 	if !exists {
@@ -108,12 +147,20 @@ func (e *CommandExecutor) buildCommand(tool, target string, params map[string]st
 		return nil, fmt.Errorf("invalid tool specified")
 	}
 
-	cmd := exec.Command(toolPath, args...)
-	return cmd, nil
+	return exec.Command(toolPath, args...), nil
 }
 
 // Execute runs a network tool command and streams the output
 func (e *CommandExecutor) Execute(ctx context.Context, tool, target string, params map[string]string, outputChan chan<- CommandResult) {
+	// Send command string as first output
+	cmdString := e.buildCommandString(tool, target, params)
+	outputChan <- CommandResult{
+		Tool:      tool,
+		Target:    target,
+		Output:    fmt.Sprintf("$ %s", cmdString),
+		StartTime: time.Now(),
+	}
+
 	result := CommandResult{
 		Tool:      tool,
 		Target:    target,
