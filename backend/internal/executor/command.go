@@ -1,4 +1,5 @@
 // File: backend/internal/executor/command.go
+// File: backend/internal/executor/command.go
 
 package executor
 
@@ -11,12 +12,11 @@ import (
 	"time"
 )
 
-// CommandExecutor handles the execution of network tools
-type CommandExecutor struct {
-	// Allowed tools and their paths
-	toolPaths map[string]string
-	// Maximum execution time per command
-	timeout time.Duration
+// CommandRequest represents a request to execute a network tool
+type CommandRequest struct {
+	Tool       string            `json:"tool"`
+	Target     string            `json:"target"`
+	Parameters map[string]string `json:"parameters"`
 }
 
 // CommandResult represents the result of a command execution
@@ -27,6 +27,14 @@ type CommandResult struct {
 	Error     string    `json:"error,omitempty"`
 	StartTime time.Time `json:"startTime"`
 	EndTime   time.Time `json:"endTime"`
+}
+
+// CommandExecutor handles the execution of network tools
+type CommandExecutor struct {
+	// Allowed tools and their paths
+	toolPaths map[string]string
+	// Maximum execution time per command
+	timeout time.Duration
 }
 
 // NewExecutor creates a new CommandExecutor instance
