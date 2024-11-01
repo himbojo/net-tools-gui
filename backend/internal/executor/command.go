@@ -6,8 +6,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -37,11 +37,25 @@ type CommandExecutor struct {
 
 // NewExecutor creates a new CommandExecutor instance
 func NewExecutor() *CommandExecutor {
+	// Initialize with appropriate paths based on the operating system
+	var pingPath, digPath, traceroutePath string
+
+	switch runtime.GOOS {
+	case "windows":
+		pingPath = "ping"
+		digPath = "dig"
+		traceroutePath = "tracert"
+	default: // linux, darwin, etc.
+		pingPath = "/usr/bin/ping"
+		digPath = "/usr/bin/dig"
+		traceroutePath = "/usr/bin/traceroute"
+	}
+
 	return &CommandExecutor{
 		toolPaths: map[string]string{
-			"ping":       "/usr/bin/ping",
-			"dig":        "/usr/bin/dig",
-			"traceroute": "/usr/bin/traceroute",
+			"ping":       pingPath,
+			"dig":        digPath,
+			"traceroute": traceroutePath,
 		},
 		timeout: 60 * time.Second,
 	}
@@ -61,7 +75,15 @@ func (e *CommandExecutor) buildCommand(tool, target string, params map[string]st
 		if c, ok := params["count"]; ok && c != "" {
 			count = c
 		}
-		args = []string{"-c", count, "-W", "2", target}
+
+		switch runtime.GOOS {
+		case "windows":
+			args = []string{"-n", count, "-w", "2000", target}
+		case "darwin":
+			args = []string{"-c", count, "-t", "2", target}
+		default: // linux
+			args = []string{"-c", count, "-W", "2", "-O", target}
+		}
 
 	case "dig":
 		recordType := "A"
@@ -75,7 +97,12 @@ func (e *CommandExecutor) buildCommand(tool, target string, params map[string]st
 		if h, ok := params["maxHops"]; ok && h != "" {
 			maxHops = h
 		}
-		args = []string{"-m", maxHops, "-w", "2", target}
+		switch runtime.GOOS {
+		case "windows":
+			args = []string{"-h", maxHops, "-w", "2000", target}
+		default:
+			args = []string{"-m", maxHops, "-w", "2", target}
+		}
 
 	default:
 		return nil, fmt.Errorf("invalid tool specified")
@@ -136,56 +163,46 @@ func (e *CommandExecutor) Execute(ctx context.Context, tool, target string, para
 
 	// Read stdout in a goroutine
 	go func() {
-		reader := bufio.NewReader(stdout)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err != io.EOF {
-					done <- err
-				}
-				break
-			}
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
 			if line = strings.TrimSpace(line); line != "" {
-				result := CommandResult{
+				select {
+				case outputChan <- CommandResult{
 					Tool:      tool,
 					Target:    target,
 					Output:    line,
 					StartTime: time.Now(),
-				}
-				select {
-				case outputChan <- result:
+				}:
 				case <-ctx.Done():
 					return
 				}
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			done <- err
+		}
 	}()
 
 	// Read stderr in a goroutine
 	go func() {
-		reader := bufio.NewReader(stderr)
+		scanner := bufio.NewScanner(stderr)
 		var errOutput strings.Builder
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err != io.EOF {
-					done <- err
-				}
-				break
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) != "" {
+				errOutput.WriteString(line + "\n")
 			}
-			errOutput.WriteString(line)
 		}
-		if errStr := errOutput.String(); errStr != "" {
-			result := CommandResult{
+		if errStr := strings.TrimSpace(errOutput.String()); errStr != "" {
+			select {
+			case outputChan <- CommandResult{
 				Tool:      tool,
 				Target:    target,
 				Error:     errStr,
 				StartTime: time.Now(),
-			}
-			select {
-			case outputChan <- result:
+			}:
 			case <-ctx.Done():
-				return
 			}
 		}
 	}()
@@ -210,6 +227,13 @@ func (e *CommandExecutor) Execute(ctx context.Context, tool, target string, para
 		if err != nil && result.Error == "" {
 			result.Error = err.Error()
 			outputChan <- result
+		}
+		// Send a final result to indicate completion
+		outputChan <- CommandResult{
+			Tool:      tool,
+			Target:    target,
+			EndTime:   time.Now(),
+			StartTime: result.StartTime,
 		}
 		return
 	}
