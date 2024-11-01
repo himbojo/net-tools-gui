@@ -1,12 +1,12 @@
 // File: backend/internal/executor/command.go
-// File: backend/internal/executor/command.go
 
 package executor
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -31,10 +31,8 @@ type CommandResult struct {
 
 // CommandExecutor handles the execution of network tools
 type CommandExecutor struct {
-	// Allowed tools and their paths
 	toolPaths map[string]string
-	// Maximum execution time per command
-	timeout time.Duration
+	timeout   time.Duration
 }
 
 // NewExecutor creates a new CommandExecutor instance
@@ -49,14 +47,12 @@ func NewExecutor() *CommandExecutor {
 	}
 }
 
-// buildCommand constructs the command with safe parameters
 func (e *CommandExecutor) buildCommand(tool, target string, params map[string]string) (*exec.Cmd, error) {
 	toolPath, exists := e.toolPaths[tool]
 	if !exists {
 		return nil, fmt.Errorf("unsupported tool: %s", tool)
 	}
 
-	// Basic command arguments
 	args := []string{}
 
 	switch tool {
@@ -110,10 +106,22 @@ func (e *CommandExecutor) Execute(ctx context.Context, tool, target string, para
 		return
 	}
 
-	// Set up output buffering
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+	// Create pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to create stdout pipe: %v", err)
+		result.EndTime = time.Now()
+		outputChan <- result
+		return
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to create stderr pipe: %v", err)
+		result.EndTime = time.Now()
+		outputChan <- result
+		return
+	}
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
@@ -123,59 +131,86 @@ func (e *CommandExecutor) Execute(ctx context.Context, tool, target string, para
 		return
 	}
 
-	// Create a channel for command completion
-	done := make(chan error)
+	// Channel to signal when reading is complete
+	done := make(chan error, 1)
+
+	// Read stdout in a goroutine
+	go func() {
+		reader := bufio.NewReader(stdout)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err != io.EOF {
+					done <- err
+				}
+				break
+			}
+			if line = strings.TrimSpace(line); line != "" {
+				result := CommandResult{
+					Tool:      tool,
+					Target:    target,
+					Output:    line,
+					StartTime: time.Now(),
+				}
+				select {
+				case outputChan <- result:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	// Read stderr in a goroutine
+	go func() {
+		reader := bufio.NewReader(stderr)
+		var errOutput strings.Builder
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err != io.EOF {
+					done <- err
+				}
+				break
+			}
+			errOutput.WriteString(line)
+		}
+		if errStr := errOutput.String(); errStr != "" {
+			result := CommandResult{
+				Tool:      tool,
+				Target:    target,
+				Error:     errStr,
+				StartTime: time.Now(),
+			}
+			select {
+			case outputChan <- result:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Wait for command completion or context cancellation
 	go func() {
 		done <- cmd.Wait()
 	}()
 
-	// Buffer for accumulating output
-	var lastOutput string
-
-	// Monitor command execution
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Context cancelled or timed out
-			if cmd.Process != nil {
-				cmd.Process.Kill()
-			}
-			result.Error = "command execution timed out"
-			result.EndTime = time.Now()
-			outputChan <- result
-			return
-
-		case err := <-done:
-			// Command completed
-			result.EndTime = time.Now()
-			if err != nil {
-				result.Error = stderrBuf.String()
-				if result.Error == "" {
-					result.Error = err.Error()
-				}
-			}
-			finalOutput := stdoutBuf.String()
-			if finalOutput != lastOutput {
-				result.Output = finalOutput
-				outputChan <- result
-			}
-			return
-
-		case <-ticker.C:
-			// Check for new output
-			currentOutput := stdoutBuf.String()
-			if currentOutput != lastOutput {
-				// Send only the new output
-				newOutput := strings.TrimPrefix(currentOutput, lastOutput)
-				if newOutput != "" {
-					result.Output = newOutput
-					outputChan <- result
-					lastOutput = currentOutput
-				}
-			}
+	select {
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			cmd.Process.Kill()
 		}
+		result.Error = "command execution timed out"
+		result.EndTime = time.Now()
+		outputChan <- result
+		return
+
+	case err := <-done:
+		result.EndTime = time.Now()
+		if err != nil && result.Error == "" {
+			result.Error = err.Error()
+			outputChan <- result
+		}
+		return
 	}
 }
