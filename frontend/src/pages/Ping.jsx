@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'preact/hooks'
-import { Clock, Wifi } from 'lucide-react'
+import { Wifi } from 'lucide-react'
 import CommandPanel from '../components/CommandPanel'
 import OutputDisplay from '../components/OutputDisplay'
 
-export default function Ping({ onExecute, lastMessage }) {
-  const [output, setOutput] = useState('')
+export default function Ping({ onExecute, lastMessage, toolState, onStateChange }) {
   const [isRunning, setIsRunning] = useState(false)
   const [stats, setStats] = useState({
     sent: 0,
@@ -15,12 +14,16 @@ export default function Ping({ onExecute, lastMessage }) {
   useEffect(() => {
     if (lastMessage?.tool === 'ping') {
       if (lastMessage.error) {
-        setOutput(prev => prev + '\nError: ' + lastMessage.error)
+        onStateChange({
+          output: toolState.output + '\nError: ' + lastMessage.error
+        })
         setIsRunning(false)
       } else if (lastMessage.output) {
         // Parse ping output for statistics
         const line = lastMessage.output.trim()
-        setOutput(prev => prev + '\n' + line)
+        onStateChange({
+          output: toolState.output + '\n' + line
+        })
         
         // Update stats based on output
         if (line.includes('bytes from')) {
@@ -44,7 +47,12 @@ export default function Ping({ onExecute, lastMessage }) {
   }, [lastMessage])
 
   const handleExecute = (command) => {
-    setOutput('')
+    // Only clear output when starting a new execution
+    onStateChange({
+      target: command.target,
+      params: command.parameters,
+      output: ''
+    })
     setIsRunning(true)
     setStats({ sent: 0, received: 0, avgTime: null })
     onExecute(command)
@@ -67,6 +75,10 @@ export default function Ping({ onExecute, lastMessage }) {
           tool="ping"
           onExecute={handleExecute}
           isLoading={isRunning}
+          initialState={{
+            target: toolState.target,
+            params: toolState.params
+          }}
         />
 
         {(isRunning || stats.sent > 0) && (
@@ -95,7 +107,7 @@ export default function Ping({ onExecute, lastMessage }) {
           </div>
         )}
       </div>
-      <OutputDisplay output={output} />
+      <OutputDisplay output={toolState.output} />
     </div>
   )
 }

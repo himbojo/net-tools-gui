@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'preact/hooks'
-import { Globe, History, XCircle } from 'lucide-react'
+import { Globe, History } from 'lucide-react'
 import CommandPanel from '../components/CommandPanel'
 import OutputDisplay from '../components/OutputDisplay'
 
-export default function Dig({ onExecute, lastMessage }) {
-  const [output, setOutput] = useState('')
+export default function Dig({ onExecute, lastMessage, toolState, onStateChange }) {
   const [isRunning, setIsRunning] = useState(false)
   const [queryHistory, setQueryHistory] = useState([])
   const [parsedRecords, setParsedRecords] = useState([])
@@ -12,13 +11,18 @@ export default function Dig({ onExecute, lastMessage }) {
   useEffect(() => {
     if (lastMessage?.tool === 'dig') {
       if (lastMessage.error) {
-        setOutput(prev => prev + '\nError: ' + lastMessage.error)
+        onStateChange({
+          output: toolState.output + '\nError: ' + lastMessage.error
+        })
         setIsRunning(false)
       } else if (lastMessage.output) {
-        setOutput(prev => prev + '\n' + lastMessage.output)
+        const newOutput = lastMessage.output.trim()
+        onStateChange({
+          output: toolState.output + '\n' + newOutput
+        })
         
         // Parse DNS records from output
-        const lines = lastMessage.output.split('\n')
+        const lines = newOutput.split('\n')
         const records = lines
           .filter(line => line.includes('IN'))
           .map(line => {
@@ -33,7 +37,7 @@ export default function Dig({ onExecute, lastMessage }) {
           })
         
         if (records.length > 0) {
-          setParsedRecords(records)
+          setParsedRecords(prev => [...prev, ...records])
         }
       }
       
@@ -53,18 +57,23 @@ export default function Dig({ onExecute, lastMessage }) {
   }, [lastMessage])
 
   const handleExecute = (command) => {
-    setOutput('')
+    onStateChange({
+      target: command.target,
+      params: command.parameters,
+      output: ''
+    })
     setIsRunning(true)
     setParsedRecords([])
     onExecute(command)
   }
 
   const handleHistoryClick = (query) => {
-    onExecute({
+    const command = {
       tool: 'dig',
       target: query.target,
       parameters: { type: query.type }
-    })
+    }
+    handleExecute(command)
   }
 
   return (
@@ -84,8 +93,12 @@ export default function Dig({ onExecute, lastMessage }) {
           tool="dig"
           onExecute={handleExecute}
           isLoading={isRunning}
+          initialState={{
+            target: toolState.target,
+            params: toolState.params
+          }}
         />
-
+        
         {queryHistory.length > 0 && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="flex items-center text-sm font-medium text-gray-700 mb-2">
@@ -97,7 +110,9 @@ export default function Dig({ onExecute, lastMessage }) {
                 <button
                   key={index}
                   onClick={() => handleHistoryClick(query)}
-                  className="text-left px-3 py-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors"
+                  className="text-left px-3 py-2 bg-gray-50 rounded-md hover:bg-gray-100 
+                    transition-colors duration-200 focus:outline-none focus:ring-2 
+                    focus:ring-blue-500 focus:ring-offset-2"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-gray-900">{query.target}</span>
@@ -132,7 +147,7 @@ export default function Dig({ onExecute, lastMessage }) {
           </div>
         )}
       </div>
-      <OutputDisplay output={output} />
+      <OutputDisplay output={toolState.output} />
     </div>
   )
 }

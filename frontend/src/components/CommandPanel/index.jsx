@@ -3,26 +3,34 @@ import { useRateLimit } from '../../hooks/useRateLimit'
 import { useInputValidation } from '../../utils/validation'
 import { AlertCircle, Loader2 } from 'lucide-react'
 
-export default function CommandPanel({ tool, onExecute, isLoading }) {
-  const [target, setTarget] = useState('')
-  const [params, setParams] = useState({
-    ping: { count: '4' },
-    dig: { type: 'A' },
-    traceroute: { maxHops: '30' }
-  }[tool])
+export default function CommandPanel({ tool, onExecute, isLoading, initialState = {} }) {
+  const [target, setTarget] = useState(initialState.target || '')
+  const [params, setParams] = useState(() => {
+    // Initialize with either provided params or defaults
+    return initialState.params || {
+      ping: { count: '4' },
+      dig: { type: 'A' },
+      traceroute: { maxHops: '30' }
+    }[tool]
+  })
   
   const { isLimited, execute, remaining } = useRateLimit(10, 60000)
   const { validateInput, isValidating, error: validationError } = useInputValidation(tool)
-  
-  // Reset params when tool changes
+
+  // Update target when initialState changes
   useEffect(() => {
-    setParams({
+    setTarget(initialState.target || '')
+  }, [initialState.target])
+
+  // Update params when initialState or tool changes
+  useEffect(() => {
+    setParams(initialState.params || {
       ping: { count: '4' },
       dig: { type: 'A' },
       traceroute: { maxHops: '30' }
     }[tool])
-  }, [tool])
-  
+  }, [tool, initialState.params])
+
   const handleExecute = async () => {
     if (await validateInput(target, params)) {
       execute(() => {
@@ -34,7 +42,17 @@ export default function CommandPanel({ tool, onExecute, isLoading }) {
       })
     }
   }
-  
+
+  const handleTargetChange = (e) => {
+    const newTarget = e.target.value
+    setTarget(newTarget)
+  }
+
+  const handleParamChange = (paramName, value) => {
+    const newParams = { ...params, [paramName]: value }
+    setParams(newParams)
+  }
+
   const toolConfigs = {
     ping: (
       <div className="flex items-center space-x-4">
@@ -46,7 +64,7 @@ export default function CommandPanel({ tool, onExecute, isLoading }) {
             max="10"
             className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50"
             value={params.count}
-            onChange={e => setParams({ ...params, count: e.target.value })}
+            onChange={(e) => handleParamChange('count', e.target.value)}
             disabled={isLoading || isValidating}
           />
         </label>
@@ -61,7 +79,7 @@ export default function CommandPanel({ tool, onExecute, isLoading }) {
           <select
             className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50"
             value={params.type}
-            onChange={e => setParams({ ...params, type: e.target.value })}
+            onChange={(e) => handleParamChange('type', e.target.value)}
             disabled={isLoading || isValidating}
           >
             {['A', 'AAAA', 'MX', 'NS', 'TXT', 'SOA'].map(type => (
@@ -82,7 +100,7 @@ export default function CommandPanel({ tool, onExecute, isLoading }) {
             max="30"
             className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50"
             value={params.maxHops}
-            onChange={e => setParams({ ...params, maxHops: e.target.value })}
+            onChange={(e) => handleParamChange('maxHops', e.target.value)}
             disabled={isLoading || isValidating}
           />
         </label>
@@ -108,7 +126,7 @@ export default function CommandPanel({ tool, onExecute, isLoading }) {
                 ${isValidating ? 'pr-10' : ''}
                 disabled:opacity-50`}
               value={target}
-              onChange={e => setTarget(e.target.value)}
+              onChange={handleTargetChange}
               disabled={isLoading || isValidating}
             />
             {isValidating && (

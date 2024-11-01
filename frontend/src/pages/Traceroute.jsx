@@ -3,8 +3,7 @@ import { Terminal, Map, Clock } from 'lucide-react'
 import CommandPanel from '../components/CommandPanel'
 import OutputDisplay from '../components/OutputDisplay'
 
-export default function Traceroute({ onExecute, lastMessage }) {
-  const [output, setOutput] = useState('')
+export default function Traceroute({ onExecute, lastMessage, toolState, onStateChange }) {
   const [isRunning, setIsRunning] = useState(false)
   const [hopCount, setHopCount] = useState(0)
   const [hops, setHops] = useState([])
@@ -13,11 +12,15 @@ export default function Traceroute({ onExecute, lastMessage }) {
   useEffect(() => {
     if (lastMessage?.tool === 'traceroute') {
       if (lastMessage.error) {
-        setOutput(prev => prev + '\nError: ' + lastMessage.error)
+        onStateChange({
+          output: toolState.output + '\nError: ' + lastMessage.error
+        })
         setIsRunning(false)
       } else if (lastMessage.output) {
         const line = lastMessage.output.trim()
-        setOutput(prev => prev + '\n' + line)
+        onStateChange({
+          output: toolState.output + '\n' + line
+        })
         
         // Parse hop information
         const hopMatch = line.match(/^\s*(\d+)\s+(\S+)\s+\(([\d.]+)\)\s+([\d.]+\s+ms|[*]+)/)
@@ -41,7 +44,11 @@ export default function Traceroute({ onExecute, lastMessage }) {
   }, [lastMessage])
 
   const handleExecute = (command) => {
-    setOutput('')
+    onStateChange({
+      target: command.target,
+      params: command.parameters,
+      output: ''
+    })
     setIsRunning(true)
     setHopCount(0)
     setHops([])
@@ -71,6 +78,10 @@ export default function Traceroute({ onExecute, lastMessage }) {
           tool="traceroute"
           onExecute={handleExecute}
           isLoading={isRunning}
+          initialState={{
+            target: toolState.target,
+            params: toolState.params
+          }}
         />
 
         {(isRunning || hops.length > 0) && (
@@ -134,7 +145,7 @@ export default function Traceroute({ onExecute, lastMessage }) {
           </div>
         )}
       </div>
-      <OutputDisplay output={output} />
+      <OutputDisplay output={toolState.output} />
     </div>
   )
 }
