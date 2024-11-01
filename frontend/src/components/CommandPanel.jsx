@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
-import { useRateLimit } from '../../hooks/useRateLimit'
-import { useInputValidation } from '../../utils/validation'
+import { useRateLimit } from '../hooks/useRateLimit'
+import { useInputValidation } from '../utils/validation'
 import { AlertCircle, Loader2 } from 'lucide-react'
 
 export default function CommandPanel({ tool, onExecute, isLoading, initialState = {} }) {
