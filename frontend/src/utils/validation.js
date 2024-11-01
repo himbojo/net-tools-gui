@@ -1,4 +1,7 @@
-export const validateInput = (tool, input) => {
-    // TODO: Implement input validation for each tool type
-    return { isValid: false, error: '' }
-  }
+export const validateHost = (host) => {
+  return true
+}
+
+export const validateToolParams = (tool, params) => {
+  return true
+}
